@@ -1,6 +1,6 @@
 import type {MaterialTopTabNavigationEventMap} from '@react-navigation/material-top-tabs';
 import {createMaterialTopTabNavigator} from '@react-navigation/material-top-tabs';
-import type {EventMapCore, NavigationState, ScreenListeners} from '@react-navigation/native';
+import type {EventMapCore, NavigationState, ParamListBase, ScreenListeners} from '@react-navigation/native';
 import {useRoute} from '@react-navigation/native';
 import React, {useCallback, useContext, useEffect, useRef, useState} from 'react';
 import {useOnyx} from 'react-native-onyx';
@@ -50,6 +50,12 @@ type OnyxTabNavigatorProps = ChildrenProps & {
     /** Disable swipe between tabs */
     disableSwipe?: boolean;
 
+    /** Determines whether the product training tooltip should be displayed to the user. */
+    shouldShowProductTrainingTooltip?: boolean;
+
+    /** Function to render the content of the product training tooltip. */
+    renderProductTrainingTooltip?: () => React.JSX.Element;
+
     /** Whether to lazy load the tab screens */
     lazyLoadEnabled?: boolean;
 
@@ -57,8 +63,7 @@ type OnyxTabNavigatorProps = ChildrenProps & {
     onTabSelect?: ({index}: {index: number}) => void;
 };
 
-// eslint-disable-next-line rulesdir/no-inline-named-export
-const TopTab = createMaterialTopTabNavigator();
+const TopTab = createMaterialTopTabNavigator<ParamListBase, string>();
 
 // The TabFocusTrapContext is to collect the focus trap container element of each tab screen.
 // This provider is placed in the OnyxTabNavigator component and the consumer is in the TabScreenWithFocusTrapWrapper component.
@@ -78,6 +83,8 @@ function OnyxTabNavigator({
     screenListeners,
     shouldShowLabelWhenInactive = true,
     disableSwipe = false,
+    shouldShowProductTrainingTooltip,
+    renderProductTrainingTooltip,
     lazyLoadEnabled = false,
     onTabSelect,
     ...rest
@@ -114,12 +121,14 @@ function OnyxTabNavigator({
                 <TabBar
                     onFocusTrapContainerElementChanged={onTabBarFocusTrapContainerElementChanged}
                     shouldShowLabelWhenInactive={shouldShowLabelWhenInactive}
+                    shouldShowProductTrainingTooltip={shouldShowProductTrainingTooltip}
+                    renderProductTrainingTooltip={renderProductTrainingTooltip}
                     // eslint-disable-next-line react/jsx-props-no-spreading
                     {...props}
                 />
             );
         },
-        [TabBar, onTabBarFocusTrapContainerElementChanged, shouldShowLabelWhenInactive],
+        [TabBar, onTabBarFocusTrapContainerElementChanged, shouldShowLabelWhenInactive, shouldShowProductTrainingTooltip, renderProductTrainingTooltip],
     );
 
     // If the selected tab changes, we need to update the focus trap container element of the active tab

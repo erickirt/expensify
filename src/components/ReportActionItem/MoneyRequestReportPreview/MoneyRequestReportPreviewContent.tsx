@@ -1,12 +1,12 @@
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {FlatList, View} from 'react-native';
+import React, {useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
+import {ActivityIndicator, FlatList, View} from 'react-native';
 import type {LayoutChangeEvent, ListRenderItemInfo, ViewToken} from 'react-native';
 import Animated, {useAnimatedStyle, useSharedValue, withDelay, withSpring, withTiming} from 'react-native-reanimated';
 import type {LayoutRectangle} from 'react-native/Libraries/Types/CoreEventTypes';
 import Button from '@components/Button';
 import {getButtonRole} from '@components/Button/utils';
 import ButtonWithDropdownMenu from '@components/ButtonWithDropdownMenu';
-import DelegateNoAccessModal from '@components/DelegateNoAccessModal';
+import {DelegateNoAccessContext} from '@components/DelegateNoAccessModalProvider';
 import Icon from '@components/Icon';
 import * as Expensicons from '@components/Icon/Expensicons';
 import ImageSVG from '@components/ImageSVG';
@@ -35,7 +35,7 @@ import {getTotalAmountForIOUReportPreviewButton} from '@libs/MoneyRequestReportU
 import Navigation from '@libs/Navigation/Navigation';
 import Performance from '@libs/Performance';
 import {getConnectedIntegration} from '@libs/PolicyUtils';
-import getReportPreviewAction from '@libs/ReportPreviewActionUtils';
+import {getReportPreviewAction} from '@libs/ReportPreviewActionUtils';
 import {
     areAllRequestsBeingSmartScanned as areAllRequestsBeingSmartScannedReportUtils,
     getBankAccountRoute,
@@ -105,7 +105,6 @@ function MoneyRequestReportPreviewContent({
     policy,
     invoiceReceiverPersonalDetail,
     lastTransactionViolations,
-    isDelegateAccessRestricted,
     renderTransactionItem,
     onCarouselLayout,
     onWrapperLayout,
@@ -143,6 +142,7 @@ function MoneyRequestReportPreviewContent({
     const [requestType, setRequestType] = useState<ActionHandledType>();
     const [paymentType, setPaymentType] = useState<PaymentMethodType>();
     const isIouReportArchived = useReportIsArchived(iouReportID);
+    const isChatReportArchived = useReportIsArchived(chatReport?.reportID);
 
     const getCanIOUBePaid = useCallback(
         (shouldShowOnlyPayElsewhere = false, shouldCheckApprovedState = true) =>
@@ -189,7 +189,7 @@ function MoneyRequestReportPreviewContent({
 
     // The submit button should be success green color only if the user is submitter and the policy does not have Scheduled Submit turned on
     const isWaitingForSubmissionFromCurrentUser = useMemo(() => isWaitingForSubmissionFromCurrentUserReportUtils(chatReport, policy), [chatReport, policy]);
-    const [isNoDelegateAccessMenuVisible, setIsNoDelegateAccessMenuVisible] = useState(false);
+    const {isDelegateAccessRestricted, showDelegateNoAccessModal} = useContext(DelegateNoAccessContext);
     const [reportActions] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${iouReportID}`, {canBeMissing: true});
     const confirmPayment = useCallback(
         (type: PaymentMethodType | undefined, payAsBusiness?: boolean) => {
@@ -199,7 +199,7 @@ function MoneyRequestReportPreviewContent({
             setPaymentType(type);
             setRequestType(CONST.IOU.REPORT_ACTION_TYPE.PAY);
             if (isDelegateAccessRestricted) {
-                setIsNoDelegateAccessMenuVisible(true);
+                showDelegateNoAccessModal();
             } else if (hasHeldExpensesReportUtils(iouReport?.reportID)) {
                 setIsHoldMenuVisible(true);
             } else if (chatReport && iouReport) {
@@ -211,13 +211,13 @@ function MoneyRequestReportPreviewContent({
                 }
             }
         },
-        [chatReport, iouReport, isDelegateAccessRestricted, startAnimation],
+        [chatReport, iouReport, isDelegateAccessRestricted, showDelegateNoAccessModal, startAnimation],
     );
 
     const confirmApproval = () => {
         setRequestType(CONST.IOU.REPORT_ACTION_TYPE.APPROVE);
         if (isDelegateAccessRestricted) {
-            setIsNoDelegateAccessMenuVisible(true);
+            showDelegateNoAccessModal();
         } else if (hasHeldExpensesReportUtils(iouReport?.reportID)) {
             setIsHoldMenuVisible(true);
         } else {
@@ -349,11 +349,11 @@ function MoneyRequestReportPreviewContent({
     const [optimisticIndex, setOptimisticIndex] = useState<number | undefined>(undefined);
     const carouselRef = useRef<FlatList<Transaction> | null>(null);
     const visibleItemsOnEndCount = useMemo(() => {
-        const lastItemWidth = transactions.length > 10 ? footerWidth : reportPreviewStyles.transactionPreviewStyle.width;
+        const lastItemWidth = transactions.length > 10 ? footerWidth : reportPreviewStyles.transactionPreviewCarouselStyle.width;
         const lastItemWithGap = lastItemWidth + styles.gap2.gap;
-        const itemWithGap = reportPreviewStyles.transactionPreviewStyle.width + styles.gap2.gap;
+        const itemWithGap = reportPreviewStyles.transactionPreviewCarouselStyle.width + styles.gap2.gap;
         return Math.floor((currentWidth - 2 * styles.pl2.paddingLeft - lastItemWithGap) / itemWithGap) + 1;
-    }, [transactions.length, footerWidth, reportPreviewStyles.transactionPreviewStyle.width, currentWidth, styles.pl2.paddingLeft, styles.gap2.gap]);
+    }, [transactions.length, footerWidth, reportPreviewStyles.transactionPreviewCarouselStyle.width, styles.gap2.gap, styles.pl2.paddingLeft, currentWidth]);
     const viewabilityConfig = useMemo(() => {
         return {itemVisiblePercentThreshold: 100};
     }, []);
@@ -408,8 +408,8 @@ function MoneyRequestReportPreviewContent({
 
     // The button should expand up to transaction width
     const buttonMaxWidth =
-        !shouldUseNarrowLayout && reportPreviewStyles.transactionPreviewStyle.width >= CONST.REPORT.TRANSACTION_PREVIEW.CAROUSEL.WIDTH_WIDE
-            ? {maxWidth: reportPreviewStyles.transactionPreviewStyle.width}
+        !shouldUseNarrowLayout && reportPreviewStyles.transactionPreviewCarouselStyle.width >= CONST.REPORT.TRANSACTION_PREVIEW.CAROUSEL.WIDE_WIDTH
+            ? {maxWidth: reportPreviewStyles.transactionPreviewCarouselStyle.width}
             : {};
 
     const approvedOrSettledIcon = (iouSettled || isApproved) && (
@@ -451,8 +451,8 @@ function MoneyRequestReportPreviewContent({
         if (isPaidAnimationRunning) {
             return CONST.REPORT.REPORT_PREVIEW_ACTIONS.PAY;
         }
-        return getReportPreviewAction(violations, iouReport, policy, transactions, isIouReportArchived, reportActions, invoiceReceiverPolicy);
-    }, [isPaidAnimationRunning, violations, iouReport, policy, transactions, isIouReportArchived, reportActions, invoiceReceiverPolicy]);
+        return getReportPreviewAction(violations, iouReport, policy, transactions, isIouReportArchived || isChatReportArchived, reportActions, invoiceReceiverPolicy);
+    }, [isPaidAnimationRunning, violations, iouReport, policy, transactions, isIouReportArchived, reportActions, invoiceReceiverPolicy, isChatReportArchived]);
 
     const addExpenseDropdownOptions = useMemo(
         () => [
@@ -539,6 +539,7 @@ function MoneyRequestReportPreviewContent({
         [CONST.REPORT.REPORT_PREVIEW_ACTIONS.EXPORT_TO_ACCOUNTING]: connectedIntegration ? (
             <ExportWithDropdownMenu
                 report={iouReport}
+                reportActions={reportActions}
                 connectionName={connectedIntegration}
                 wrapperStyle={styles.flexReset}
                 dropdownAnchorAlignment={{
@@ -604,6 +605,7 @@ function MoneyRequestReportPreviewContent({
                 <View
                     style={[styles.chatItemMessage, isReportDeleted && [styles.cursorDisabled, styles.pointerEventsAuto], containerStyles]}
                     onLayout={onCarouselLayout}
+                    testID="carouselWidthSetter"
                 >
                     <PressableWithoutFeedback
                         onPress={onPress}
@@ -662,7 +664,7 @@ function MoneyRequestReportPreviewContent({
                                                     )}
                                                 </Animated.View>
                                             </View>
-                                            {!shouldUseNarrowLayout && transactions.length > 2 && (
+                                            {!shouldUseNarrowLayout && transactions.length > 2 && reportPreviewStyles.expenseCountVisible && (
                                                 <View style={[styles.flexRow, styles.alignItemsCenter]}>
                                                     <Text style={[styles.textLabelSupporting, styles.textLabelSupporting, styles.lh20, styles.mr1]}>{supportText}</Text>
                                                     <PressableWithFeedback
@@ -705,29 +707,46 @@ function MoneyRequestReportPreviewContent({
                                             )}
                                         </View>
                                     </View>
-                                    <View style={[styles.flex1, styles.flexColumn, styles.overflowVisible, styles.mtn1]}>
-                                        <FlatList
-                                            snapToAlignment="start"
-                                            decelerationRate="fast"
-                                            snapToInterval={reportPreviewStyles.transactionPreviewStyle.width + styles.gap2.gap}
-                                            horizontal
-                                            data={carouselTransactions}
-                                            ref={carouselRef}
-                                            nestedScrollEnabled
-                                            bounces={false}
-                                            keyExtractor={(item) => `${item.transactionID}_${reportPreviewStyles.transactionPreviewStyle.width}`}
-                                            contentContainerStyle={[styles.gap2]}
-                                            style={reportPreviewStyles.flatListStyle}
-                                            showsHorizontalScrollIndicator={false}
-                                            renderItem={renderFlatlistItem}
-                                            onViewableItemsChanged={onViewableItemsChanged}
-                                            onEndReached={adjustScroll}
-                                            viewabilityConfig={viewabilityConfig}
-                                            ListFooterComponent={<View style={styles.pl2} />}
-                                            ListHeaderComponent={<View style={styles.pr2} />}
-                                        />
-                                        {shouldShowEmptyPlaceholder && <EmptyMoneyRequestReportPreview emptyReportPreviewAction={reportPreviewActions[reportPreviewAction]} />}
-                                    </View>
+                                    {!currentWidth ? (
+                                        <View
+                                            style={[
+                                                {
+                                                    height: CONST.REPORT.TRANSACTION_PREVIEW.CAROUSEL.WIDE_HEIGHT,
+                                                },
+                                                styles.justifyContentCenter,
+                                                styles.mtn1,
+                                            ]}
+                                        >
+                                            <ActivityIndicator
+                                                color={theme.spinner}
+                                                size={40}
+                                            />
+                                        </View>
+                                    ) : (
+                                        <View style={[styles.flex1, styles.flexColumn, styles.overflowVisible, styles.mtn1]}>
+                                            <FlatList
+                                                snapToAlignment="start"
+                                                decelerationRate="fast"
+                                                snapToInterval={reportPreviewStyles.transactionPreviewCarouselStyle.width + styles.gap2.gap}
+                                                horizontal
+                                                data={carouselTransactions}
+                                                ref={carouselRef}
+                                                nestedScrollEnabled
+                                                bounces={false}
+                                                keyExtractor={(item) => `${item.transactionID}_${reportPreviewStyles.transactionPreviewCarouselStyle.width}`}
+                                                contentContainerStyle={[styles.gap2]}
+                                                style={reportPreviewStyles.flatListStyle}
+                                                showsHorizontalScrollIndicator={false}
+                                                renderItem={renderFlatlistItem}
+                                                onViewableItemsChanged={onViewableItemsChanged}
+                                                onEndReached={adjustScroll}
+                                                viewabilityConfig={viewabilityConfig}
+                                                ListFooterComponent={<View style={styles.pl2} />}
+                                                ListHeaderComponent={<View style={styles.pr2} />}
+                                            />
+                                            {shouldShowEmptyPlaceholder && <EmptyMoneyRequestReportPreview emptyReportPreviewAction={reportPreviewActions[reportPreviewAction]} />}
+                                        </View>
+                                    )}
                                     {shouldUseNarrowLayout && transactions.length > 1 && (
                                         <View style={[styles.flexRow, styles.alignSelfCenter, styles.gap2]}>
                                             {carouselTransactions.map((item, index) => (
@@ -748,10 +767,6 @@ function MoneyRequestReportPreviewContent({
                         </View>
                     </PressableWithoutFeedback>
                 </View>
-                <DelegateNoAccessModal
-                    isNoDelegateAccessMenuVisible={isNoDelegateAccessMenuVisible}
-                    onClose={() => setIsNoDelegateAccessMenuVisible(false)}
-                />
                 {isHoldMenuVisible && !!iouReport && !!requestType && (
                     <ProcessMoneyReportHoldMenu
                         nonHeldAmount={!hasOnlyHeldExpenses && hasValidNonHeldAmount ? nonHeldAmount : undefined}
